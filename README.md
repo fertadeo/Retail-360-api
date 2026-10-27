@@ -48,7 +48,7 @@ DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
 CORS_ORIGIN=https://{slug}.aurixerp.com
 ```
 
-Scripts usados: `npm run build` · `npm start`.
+Scripts usados: `npm run build` · `npm start` (aplica `sql/` al arrancar).
 
 ## Gold en Fenec Admin
 
