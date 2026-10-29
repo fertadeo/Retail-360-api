@@ -1,12 +1,16 @@
 import { Router } from "express";
 import { z } from "zod";
+import { readComercioId } from "../lib/comercio-req.js";
 import { sendError } from "../lib/http.js";
 import * as branchesSvc from "../services/branches.js";
 import * as channelsSvc from "../services/channels.js";
 import * as clientsSvc from "../services/clients.js";
+import * as comerciosSvc from "../services/comercios.js";
+import * as discountRulesSvc from "../services/discount-rules.js";
 import * as ordersSvc from "../services/orders.js";
 import * as priceListsSvc from "../services/price-lists.js";
 import * as productsSvc from "../services/products.js";
+import * as quotesSvc from "../services/quotes.js";
 import { testConnection } from "../db/pool.js";
 
 export const apiRouter = Router();
@@ -24,7 +28,8 @@ apiRouter.get("/dashboard/stats", async (req, res) => {
   try {
     const day =
       typeof req.query.day === "string" ? req.query.day : undefined;
-    res.json(await ordersSvc.dashboardStats(day));
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
+    res.json(await ordersSvc.dashboardStats(day, comercioId));
   } catch (err) {
     sendError(res, err);
   }
@@ -34,7 +39,8 @@ apiRouter.get("/dashboard/stats", async (req, res) => {
 apiRouter.get("/price-lists", async (req, res) => {
   try {
     const onlyActive = req.query.active === "1" || req.query.active === "true";
-    res.json(await priceListsSvc.listPriceLists(onlyActive));
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
+    res.json(await priceListsSvc.listPriceLists(onlyActive, comercioId));
   } catch (err) {
     sendError(res, err);
   }
@@ -42,6 +48,7 @@ apiRouter.get("/price-lists", async (req, res) => {
 
 apiRouter.post("/price-lists", async (req, res) => {
   try {
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
     const body = z
       .object({
         nombre: z.string(),
@@ -50,7 +57,9 @@ apiRouter.post("/price-lists", async (req, res) => {
         esDefault: z.boolean().optional(),
       })
       .parse(req.body);
-    res.status(201).json(await priceListsSvc.createPriceList(body));
+    res.status(201).json(
+      await priceListsSvc.createPriceList({ ...body, comercioId })
+    );
   } catch (err) {
     sendError(res, err);
   }
@@ -81,9 +90,10 @@ apiRouter.post("/price-lists/:id/set-default", async (req, res) => {
 });
 
 /* —— Products —— */
-apiRouter.get("/products", async (_req, res) => {
+apiRouter.get("/products", async (req, res) => {
   try {
-    res.json(await productsSvc.listProducts());
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
+    res.json(await productsSvc.listProducts(comercioId));
   } catch (err) {
     sendError(res, err);
   }
@@ -104,6 +114,7 @@ apiRouter.get("/products/:id", async (req, res) => {
 
 const productBody = z.object({
   id: z.string().optional(),
+  comercioId: z.string().optional(),
   sku: z.string(),
   nombre: z.string(),
   categoria: z.enum(["bebidas", "alimentos", "limpieza", "otros"]),
@@ -117,7 +128,10 @@ const productBody = z.object({
 
 apiRouter.post("/products", async (req, res) => {
   try {
-    const body = productBody.parse(req.body);
+    const comercioId = await comerciosSvc.resolveComercioId(
+      readComercioId(req) ?? req.body?.comercioId
+    );
+    const body = productBody.parse({ ...req.body, comercioId });
     res.status(201).json(await productsSvc.upsertProduct(body));
   } catch (err) {
     sendError(res, err);
@@ -126,7 +140,14 @@ apiRouter.post("/products", async (req, res) => {
 
 apiRouter.patch("/products/:id", async (req, res) => {
   try {
-    const body = productBody.parse({ ...req.body, id: req.params.id });
+    const comercioId = await comerciosSvc.resolveComercioId(
+      readComercioId(req) ?? req.body?.comercioId
+    );
+    const body = productBody.parse({
+      ...req.body,
+      id: req.params.id,
+      comercioId,
+    });
     res.json(await productsSvc.upsertProduct(body));
   } catch (err) {
     sendError(res, err);
@@ -134,9 +155,10 @@ apiRouter.patch("/products/:id", async (req, res) => {
 });
 
 /* —— Clients —— */
-apiRouter.get("/clients", async (_req, res) => {
+apiRouter.get("/clients", async (req, res) => {
   try {
-    res.json(await clientsSvc.listClients());
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
+    res.json(await clientsSvc.listClients(comercioId));
   } catch (err) {
     sendError(res, err);
   }
@@ -157,6 +179,7 @@ apiRouter.get("/clients/:id", async (req, res) => {
 
 const clientBody = z.object({
   id: z.string().optional(),
+  comercioId: z.string().optional(),
   nombre: z.string(),
   email: z.string().optional(),
   telefono: z.string().optional(),
@@ -168,7 +191,10 @@ const clientBody = z.object({
 
 apiRouter.post("/clients", async (req, res) => {
   try {
-    const body = clientBody.parse(req.body);
+    const comercioId = await comerciosSvc.resolveComercioId(
+      readComercioId(req) ?? req.body?.comercioId
+    );
+    const body = clientBody.parse({ ...req.body, comercioId });
     res.status(201).json(await clientsSvc.upsertClient(body));
   } catch (err) {
     sendError(res, err);
@@ -177,7 +203,14 @@ apiRouter.post("/clients", async (req, res) => {
 
 apiRouter.patch("/clients/:id", async (req, res) => {
   try {
-    const body = clientBody.parse({ ...req.body, id: req.params.id });
+    const comercioId = await comerciosSvc.resolveComercioId(
+      readComercioId(req) ?? req.body?.comercioId
+    );
+    const body = clientBody.parse({
+      ...req.body,
+      id: req.params.id,
+      comercioId,
+    });
     res.json(await clientsSvc.upsertClient(body));
   } catch (err) {
     sendError(res, err);
@@ -187,13 +220,14 @@ apiRouter.patch("/clients/:id", async (req, res) => {
 /* —— Orders —— */
 apiRouter.get("/orders", async (req, res) => {
   try {
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
     const canal = z
       .enum(["pos", "pedido", "mayorista"])
       .optional()
       .parse(
         typeof req.query.canal === "string" ? req.query.canal : undefined
       );
-    res.json(await ordersSvc.listOrders(canal));
+    res.json(await ordersSvc.listOrders(canal, comercioId));
   } catch (err) {
     sendError(res, err);
   }
@@ -221,13 +255,16 @@ const lineSchema = z.object({
 
 apiRouter.post("/orders", async (req, res) => {
   try {
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
     const body = z
       .object({
         clientId: z.string(),
         lines: z.array(lineSchema).min(1),
       })
       .parse(req.body);
-    res.status(201).json(await ordersSvc.createPedido(body));
+    res.status(201).json(
+      await ordersSvc.createPedido({ ...body, comercioId })
+    );
   } catch (err) {
     sendError(res, err);
   }
@@ -235,6 +272,7 @@ apiRouter.post("/orders", async (req, res) => {
 
 apiRouter.post("/pos/checkout", async (req, res) => {
   try {
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
     const body = z
       .object({
         lines: z.array(lineSchema).min(1),
@@ -247,7 +285,9 @@ apiRouter.post("/pos/checkout", async (req, res) => {
         metodoPago: z.enum(["efectivo", "transferencia"]),
       })
       .parse(req.body);
-    res.status(201).json(await ordersSvc.createPosSale(body));
+    res.status(201).json(
+      await ordersSvc.createPosSale({ ...body, comercioId })
+    );
   } catch (err) {
     sendError(res, err);
   }
@@ -255,21 +295,151 @@ apiRouter.post("/pos/checkout", async (req, res) => {
 
 apiRouter.post("/wholesale/orders", async (req, res) => {
   try {
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
     const body = z
       .object({
         clientId: z.string(),
         lines: z.array(lineSchema).min(1),
       })
       .parse(req.body);
-    res.status(201).json(await ordersSvc.createMayoristaPedido(body));
+    res.status(201).json(
+      await ordersSvc.createMayoristaPedido({ ...body, comercioId })
+    );
   } catch (err) {
     sendError(res, err);
   }
 });
 
-apiRouter.get("/wholesale/orders", async (_req, res) => {
+apiRouter.get("/wholesale/orders", async (req, res) => {
   try {
-    res.json(await ordersSvc.listOrders("mayorista"));
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
+    res.json(await ordersSvc.listOrders("mayorista", comercioId));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+/* —— Comercios + stock share / rotación —— */
+apiRouter.get("/comercios", async (req, res) => {
+  try {
+    const onlyActive = req.query.active === "1" || req.query.active === "true";
+    res.json(await comerciosSvc.listComercios(onlyActive));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/comercios", async (req, res) => {
+  try {
+    const body = z
+      .object({
+        codigo: z.string(),
+        nombre: z.string(),
+        rubro: z.string().optional(),
+        direccion: z.string().optional(),
+        activa: z.boolean().optional(),
+        esDefault: z.boolean().optional(),
+      })
+      .parse(req.body);
+    res.status(201).json(await comerciosSvc.upsertComercio(body));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.patch("/comercios/:id", async (req, res) => {
+  try {
+    const body = z
+      .object({
+        codigo: z.string(),
+        nombre: z.string(),
+        rubro: z.string().optional(),
+        direccion: z.string().optional(),
+        activa: z.boolean().optional(),
+        esDefault: z.boolean().optional(),
+      })
+      .parse(req.body);
+    res.json(
+      await comerciosSvc.upsertComercio({ ...body, id: req.params.id })
+    );
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/comercios/:id/set-default", async (req, res) => {
+  try {
+    res.json(await comerciosSvc.setDefaultComercio(req.params.id));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.get("/stock-share-groups", async (_req, res) => {
+  try {
+    res.json(await comerciosSvc.listStockShareGroups());
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/stock-share-groups", async (req, res) => {
+  try {
+    const body = z
+      .object({
+        nombre: z.string(),
+        modo: z.enum(["shared", "rotate"]),
+        activa: z.boolean().optional(),
+        comercioIds: z.array(z.string()).min(1),
+      })
+      .parse(req.body);
+    res.status(201).json(await comerciosSvc.upsertStockShareGroup(body));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.patch("/stock-share-groups/:id", async (req, res) => {
+  try {
+    const body = z
+      .object({
+        nombre: z.string(),
+        modo: z.enum(["shared", "rotate"]),
+        activa: z.boolean().optional(),
+        comercioIds: z.array(z.string()).min(1),
+      })
+      .parse(req.body);
+    res.json(
+      await comerciosSvc.upsertStockShareGroup({
+        ...body,
+        id: req.params.id,
+      })
+    );
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.delete("/stock-share-groups/:id", async (req, res) => {
+  try {
+    await comerciosSvc.deleteStockShareGroup(req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/stock/transfer", async (req, res) => {
+  try {
+    const body = z
+      .object({
+        fromComercioId: z.string(),
+        toComercioId: z.string(),
+        sku: z.string(),
+        quantity: z.number(),
+      })
+      .parse(req.body);
+    res.json(await comerciosSvc.transferStock(body));
   } catch (err) {
     sendError(res, err);
   }
@@ -466,6 +636,226 @@ apiRouter.post("/channels/mercadolibre/push-all", async (req, res) => {
       .default("both")
       .parse(req.body?.mode ?? "both");
     res.json({ results: await channelsSvc.pushAllMercadoLibre(mode) });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+/* —— Descuentos escalonados —— */
+const tierSchema = z.object({
+  desde: z.number(),
+  porcentaje: z.number(),
+});
+
+apiRouter.get("/discount-rules", async (req, res) => {
+  try {
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
+    const onlyActive = req.query.active === "1" || req.query.active === "true";
+    res.json(await discountRulesSvc.listDiscountRules(comercioId, onlyActive));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.get("/discount-rules/:id", async (req, res) => {
+  try {
+    const rule = await discountRulesSvc.getDiscountRule(req.params.id);
+    if (!rule) {
+      res.status(404).json({ error: "Regla no encontrada." });
+      return;
+    }
+    res.json(rule);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/discount-rules", async (req, res) => {
+  try {
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
+    const body = z
+      .object({
+        nombre: z.string(),
+        descripcion: z.string().optional(),
+        basis: z.enum(["amount", "qty"]).optional(),
+        priceListId: z.string().nullable().optional(),
+        activa: z.boolean().optional(),
+        tiers: z.array(tierSchema).min(1),
+      })
+      .parse(req.body);
+    res.status(201).json(
+      await discountRulesSvc.upsertDiscountRule({ ...body, comercioId })
+    );
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.patch("/discount-rules/:id", async (req, res) => {
+  try {
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
+    const body = z
+      .object({
+        nombre: z.string(),
+        descripcion: z.string().optional(),
+        basis: z.enum(["amount", "qty"]).optional(),
+        priceListId: z.string().nullable().optional(),
+        activa: z.boolean().optional(),
+        tiers: z.array(tierSchema).min(1),
+      })
+      .parse(req.body);
+    res.json(
+      await discountRulesSvc.upsertDiscountRule({
+        ...body,
+        id: req.params.id,
+        comercioId,
+      })
+    );
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.delete("/discount-rules/:id", async (req, res) => {
+  try {
+    await discountRulesSvc.deleteDiscountRule(req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+/* —— Presupuestos —— */
+const quoteLineSchema = z.object({
+  productId: z.string().nullable().optional(),
+  sku: z.string().optional(),
+  nombre: z.string().optional(),
+  cantidad: z.number(),
+  precioUnitario: z.number().optional(),
+  lineDescuentoPct: z.number().optional(),
+});
+
+const quoteBodySchema = z.object({
+  clientId: z.string().nullable().optional(),
+  clienteNombre: z.string().optional(),
+  clienteEmail: z.string().optional(),
+  clienteTelefono: z.string().optional(),
+  priceListId: z.string().nullable().optional(),
+  discountRuleId: z.string().nullable().optional(),
+  discountMode: z.enum(["none", "rule", "manual"]).optional(),
+  discountBasis: z.enum(["amount", "qty"]).optional(),
+  tiers: z.array(tierSchema).optional(),
+  descuentoManualPct: z.number().optional(),
+  status: z
+    .enum([
+      "borrador",
+      "enviado",
+      "aceptado",
+      "rechazado",
+      "vencido",
+      "convertido",
+    ])
+    .optional(),
+  validezDias: z.number().optional(),
+  notas: z.string().optional(),
+  lines: z.array(quoteLineSchema).min(1),
+});
+
+apiRouter.get("/quotes", async (req, res) => {
+  try {
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
+    const status = z
+      .enum([
+        "borrador",
+        "enviado",
+        "aceptado",
+        "rechazado",
+        "vencido",
+        "convertido",
+      ])
+      .optional()
+      .parse(
+        typeof req.query.status === "string" ? req.query.status : undefined
+      );
+    res.json(await quotesSvc.listQuotes(comercioId, status));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.get("/quotes/:id", async (req, res) => {
+  try {
+    const quote = await quotesSvc.getQuote(req.params.id);
+    if (!quote) {
+      res.status(404).json({ error: "Presupuesto no encontrado." });
+      return;
+    }
+    res.json(quote);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/quotes/preview", async (req, res) => {
+  try {
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
+    const body = quoteBodySchema.parse(req.body);
+    res.json(await quotesSvc.previewQuote({ ...body, comercioId }));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/quotes", async (req, res) => {
+  try {
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
+    const body = quoteBodySchema.parse(req.body);
+    res.status(201).json(await quotesSvc.upsertQuote({ ...body, comercioId }));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.patch("/quotes/:id", async (req, res) => {
+  try {
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
+    const body = quoteBodySchema.parse(req.body);
+    res.json(
+      await quotesSvc.upsertQuote({
+        ...body,
+        id: req.params.id,
+        comercioId,
+      })
+    );
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/quotes/:id/status", async (req, res) => {
+  try {
+    const body = z
+      .object({
+        status: z.enum([
+          "borrador",
+          "enviado",
+          "aceptado",
+          "rechazado",
+          "vencido",
+          "convertido",
+        ]),
+      })
+      .parse(req.body);
+    res.json(await quotesSvc.updateQuoteStatus(req.params.id, body.status));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.delete("/quotes/:id", async (req, res) => {
+  try {
+    await quotesSvc.deleteQuote(req.params.id);
+    res.status(204).end();
   } catch (err) {
     sendError(res, err);
   }

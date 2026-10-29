@@ -5,10 +5,16 @@ import { nextId } from "../lib/ids.js";
 import type { Product, ProductCategory } from "../types.js";
 import { getProductStockByBranch, setProductBranchStock } from "./branches.js";
 import { enrichProductsWithLinks } from "./channels.js";
+import {
+  findShareGroupForComercio,
+  getDefaultComercioId,
+  setProductStock,
+} from "./comercios.js";
 import { getDefaultPriceListId } from "./price-lists.js";
 
 type ProdRow = RowDataPacket & {
   id: string;
+  comercio_id: string | null;
   sku: string;
   nombre: string;
   categoria: ProductCategory;
@@ -54,6 +60,7 @@ function mapProduct(
 ): Product {
   return {
     id: row.id,
+    comercioId: row.comercio_id,
     sku: row.sku,
     nombre: row.nombre,
     categoria: row.categoria,
@@ -66,19 +73,33 @@ function mapProduct(
   };
 }
 
-export async function listProducts(): Promise<Product[]> {
+async function decorate(products: Product[]): Promise<Product[]> {
+  const withStock = await Promise.all(
+    products.map(async (p) => {
+      let stockShared = false;
+      if (p.comercioId) {
+        const g = await findShareGroupForComercio(p.comercioId);
+        stockShared = g?.modo === "shared";
+      }
+      return {
+        ...p,
+        stockShared,
+        stockByBranch: await getProductStockByBranch(p.id),
+      };
+    })
+  );
+  return enrichProductsWithLinks(withStock);
+}
+
+export async function listProducts(comercioId?: string): Promise<Product[]> {
+  const cid = comercioId || (await getDefaultComercioId());
   const rows = await query<ProdRow[]>(
-    `SELECT * FROM products ORDER BY nombre ASC`
+    `SELECT * FROM products WHERE comercio_id = ? ORDER BY nombre ASC`,
+    [cid]
   );
   const precios = await loadPrecios(rows.map((r) => r.id));
   const base = rows.map((r) => mapProduct(r, precios.get(r.id) ?? {}));
-  const withStock = await Promise.all(
-    base.map(async (p) => ({
-      ...p,
-      stockByBranch: await getProductStockByBranch(p.id),
-    }))
-  );
-  return enrichProductsWithLinks(withStock);
+  return decorate(base);
 }
 
 export async function getProduct(id: string): Promise<Product | null> {
@@ -88,16 +109,15 @@ export async function getProduct(id: string): Promise<Product | null> {
   );
   if (!rows[0]) return null;
   const precios = await loadPrecios([id]);
-  const product = {
-    ...mapProduct(rows[0], precios.get(id) ?? {}),
-    stockByBranch: await getProductStockByBranch(id),
-  };
-  const [enriched] = await enrichProductsWithLinks([product]);
-  return enriched ?? product;
+  const [enriched] = await decorate([
+    mapProduct(rows[0], precios.get(id) ?? {}),
+  ]);
+  return enriched ?? null;
 }
 
 export async function upsertProduct(input: {
   id?: string;
+  comercioId?: string;
   sku: string;
   nombre: string;
   categoria: ProductCategory;
@@ -113,7 +133,8 @@ export async function upsertProduct(input: {
   if (!sku || !nombre) {
     throw new HttpError(400, "SKU y nombre son obligatorios.");
   }
-  const defaultListId = await getDefaultPriceListId();
+  const comercioId = input.comercioId || (await getDefaultComercioId());
+  const defaultListId = await getDefaultPriceListId(comercioId);
   const precioDefault =
     input.precios[defaultListId] ??
     Object.values(input.precios)[0] ??
@@ -126,7 +147,7 @@ export async function upsertProduct(input: {
       const [result] = await conn.execute<ResultSetHeader>(
         `UPDATE products
          SET sku = ?, nombre = ?, categoria = ?, precio_default = ?,
-             costo = ?, stock = ?, activo = ?, descripcion = ?
+             costo = ?, stock = ?, activo = ?, descripcion = ?, comercio_id = ?
          WHERE id = ?`,
         [
           sku,
@@ -137,6 +158,7 @@ export async function upsertProduct(input: {
           input.stock,
           input.activo === false ? 0 : 1,
           input.descripcion?.trim() ?? "",
+          comercioId,
           id,
         ]
       );
@@ -149,10 +171,11 @@ export async function upsertProduct(input: {
     } else {
       await conn.execute(
         `INSERT INTO products
-         (id, sku, nombre, categoria, precio_default, costo, stock, activo, descripcion)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, comercio_id, sku, nombre, categoria, precio_default, costo, stock, activo, descripcion)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id,
+          comercioId,
           sku,
           nombre,
           input.categoria,
@@ -175,12 +198,18 @@ export async function upsertProduct(input: {
     }
   });
 
+  await setProductStock(id, input.stock);
+
   if (input.stockByBranch && Object.keys(input.stockByBranch).length > 0) {
     await setProductBranchStock(id, input.stockByBranch);
   } else {
-    const { getDefaultBranchId } = await import("./branches.js");
-    const defaultBranch = await getDefaultBranchId();
-    await setProductBranchStock(id, { [defaultBranch]: input.stock });
+    try {
+      const { getDefaultBranchId } = await import("./branches.js");
+      const defaultBranch = await getDefaultBranchId();
+      await setProductBranchStock(id, { [defaultBranch]: input.stock });
+    } catch {
+      /* sin sucursales físicas aún */
+    }
   }
 
   const product = await getProduct(id);

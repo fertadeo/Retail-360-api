@@ -24,17 +24,16 @@ API en `http://127.0.0.1:3852` · prefijo `/api`.
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET/POST | `/api/branches` | Sucursales |
-| PATCH | `/api/branches/:id` | Actualizar sucursal |
-| POST | `/api/branches/:id/set-default` | Sucursal default |
+| GET/POST | `/api/comercios` | Comercios / unidades de negocio |
+| GET/POST | `/api/stock-share-groups` | Compartir o rotar stock entre comercios |
+| POST | `/api/stock/transfer` | Transferencia de stock (rotación) |
+| GET/POST | `/api/branches` | Sucursales físicas |
+| GET/POST | `/api/discount-rules` | Reglas de descuento escalonado |
+| GET/POST | `/api/quotes` | Presupuestos (lista de precios + escalones editables) |
+| POST | `/api/quotes/preview` | Preview de totales sin guardar |
 | GET | `/api/channels` | Estado WooCommerce + ML |
-| PUT | `/api/channels/:channel` | Guardar credenciales (`woocommerce` \| `mercadolibre`) |
-| PUT | `/api/products/:id/channels/:channel` | Vincular ID externo |
-| POST | `/api/channels/woocommerce/products/:id/push` | Empujar producto (crea o actualiza) |
-| POST | `/api/channels/woocommerce/link-by-sku` | Vincular por SKU |
-| POST | `/api/channels/woocommerce/push-all` | Sync masivo WC |
-| POST | `/api/channels/mercadolibre/products/:id/push` | Empujar stock/precio a ítem ML |
-| POST | `/api/channels/mercadolibre/push-all` | Sync masivo ML |
+| PUT | `/api/channels/:channel` | Guardar credenciales |
+| POST | `/api/channels/*/products/:id/push` | Empujar stock/precio |
 
 Stock de canal: `stock_mode` = `total` \| `default_branch` \| `branch` (+ `stockBranchId`).
 

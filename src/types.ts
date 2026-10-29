@@ -10,11 +10,32 @@ export type PriceList = {
   codigo: string;
   activa: boolean;
   esDefault: boolean;
+  comercioId?: string | null;
 };
 
 export type Channel = "woocommerce" | "mercadolibre";
 
 export type StockMode = "total" | "default_branch" | "branch";
+
+export type StockShareMode = "shared" | "rotate";
+
+export type Comercio = {
+  id: string;
+  codigo: string;
+  nombre: string;
+  rubro: string;
+  direccion: string;
+  activa: boolean;
+  esDefault: boolean;
+};
+
+export type StockShareGroup = {
+  id: string;
+  nombre: string;
+  modo: StockShareMode;
+  activa: boolean;
+  comercioIds: string[];
+};
 
 export type Branch = {
   id: string;
@@ -23,6 +44,7 @@ export type Branch = {
   direccion: string;
   activa: boolean;
   esDefault: boolean;
+  comercioId?: string | null;
 };
 
 export type ChannelLink = {
@@ -66,6 +88,8 @@ export type Product = {
   stockByBranch?: Record<string, number>;
   activo: boolean;
   descripcion: string;
+  comercioId?: string | null;
+  stockShared?: boolean;
   channelLinks?: ChannelLink[];
 };
 
@@ -80,6 +104,7 @@ export type Client = {
   rfc: string;
   notas: string;
   priceListId: string | null;
+  comercioId?: string | null;
 };
 
 export type OrderStatus =
@@ -113,6 +138,74 @@ export type Order = {
   direccionEnvio: string | null;
   telefonoContacto: string | null;
   metodoPago: PaymentMethod | null;
+  comercioId?: string | null;
+};
+
+export type DiscountBasis = "amount" | "qty";
+export type DiscountMode = "none" | "rule" | "manual";
+
+export type DiscountTier = {
+  /** Umbral (subtotal $ o cantidad total según basis). */
+  desde: number;
+  /** % de descuento al alcanzar el umbral. */
+  porcentaje: number;
+};
+
+export type DiscountRule = {
+  id: string;
+  comercioId?: string | null;
+  nombre: string;
+  descripcion: string;
+  basis: DiscountBasis;
+  priceListId: string | null;
+  activa: boolean;
+  tiers: DiscountTier[];
+};
+
+export type QuoteStatus =
+  | "borrador"
+  | "enviado"
+  | "aceptado"
+  | "rechazado"
+  | "vencido"
+  | "convertido";
+
+export type QuoteLine = {
+  productId: string | null;
+  sku: string;
+  nombre: string;
+  cantidad: number;
+  precioLista: number;
+  precioUnitario: number;
+  lineDescuentoPct: number;
+  importe: number;
+};
+
+export type Quote = {
+  id: string;
+  comercioId?: string | null;
+  folio: string;
+  clientId: string | null;
+  clienteNombre: string;
+  clienteEmail: string;
+  clienteTelefono: string;
+  priceListId: string | null;
+  discountRuleId: string | null;
+  discountMode: DiscountMode;
+  discountBasis: DiscountBasis;
+  tiers: DiscountTier[];
+  descuentoManualPct: number;
+  status: QuoteStatus;
+  validezDias: number;
+  validezHasta: string | null;
+  notas: string;
+  subtotal: number;
+  descuentoMonto: number;
+  descuentoPctAplicado: number;
+  total: number;
+  lines: QuoteLine[];
+  createdAt: string;
+  updatedAt: string;
 };
 
 export const PRICE_LIST_MINORISTA = "pl_minorista";

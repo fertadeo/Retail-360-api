@@ -24,6 +24,7 @@ import { getProduct } from "./products.js";
 
 type OrderRow = RowDataPacket & {
   id: string;
+  comercio_id: string | null;
   folio: string;
   client_id: string | null;
   cliente_nombre: string;
@@ -59,6 +60,7 @@ function iso(v: Date | string): string {
 function mapOrder(row: OrderRow, lines: OrderLine[]): Order {
   return {
     id: row.id,
+    comercioId: row.comercio_id,
     folio: row.folio,
     clientId: row.client_id,
     clienteNombre: row.cliente_nombre,
@@ -126,18 +128,22 @@ async function nextFolio(
   return `P-${n}`;
 }
 
+type PendingDeduction = { productId: string; qty: number };
+
 async function insertOrder(
   conn: PoolConnection,
   order: Omit<Order, "createdAt"> & { createdAt?: string },
   deductStock: boolean
-): Promise<void> {
+): Promise<PendingDeduction[]> {
+  const pending: PendingDeduction[] = [];
   await conn.execute(
     `INSERT INTO orders
-     (id, folio, client_id, cliente_nombre, status, canal, price_list_id,
+     (id, comercio_id, folio, client_id, cliente_nombre, status, canal, price_list_id,
       con_envio, envio_costo, direccion_envio, telefono_contacto, metodo_pago)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       order.id,
+      order.comercioId ?? null,
       order.folio,
       order.clientId,
       order.clienteNombre,
@@ -165,25 +171,33 @@ async function insertOrder(
       ]
     );
     if (deductStock) {
-      const [result] = await conn.execute<ResultSetHeader>(
-        `UPDATE products SET stock = GREATEST(0, stock - ?) WHERE id = ?`,
-        [line.cantidad, line.productId]
-      );
-      if (result.affectedRows === 0) {
-        throw new HttpError(400, `Producto ${line.productId} no encontrado.`);
-      }
+      pending.push({ productId: line.productId, qty: line.cantidad });
     }
+  }
+  return pending;
+}
+
+async function applyDeductions(items: PendingDeduction[]): Promise<void> {
+  const { deductStock: deduct } = await import("./comercios.js");
+  for (const item of items) {
+    await deduct(item.productId, item.qty);
   }
 }
 
-export async function listOrders(canal?: OrderCanal): Promise<Order[]> {
+export async function listOrders(
+  canal?: OrderCanal,
+  comercioId?: string
+): Promise<Order[]> {
+  const { getDefaultComercioId } = await import("./comercios.js");
+  const cid = comercioId || (await getDefaultComercioId());
   const rows = canal
     ? await query<OrderRow[]>(
-        `SELECT * FROM orders WHERE canal = ? ORDER BY created_at DESC`,
-        [canal]
+        `SELECT * FROM orders WHERE comercio_id = ? AND canal = ? ORDER BY created_at DESC`,
+        [cid, canal]
       )
     : await query<OrderRow[]>(
-        `SELECT * FROM orders ORDER BY created_at DESC`
+        `SELECT * FROM orders WHERE comercio_id = ? ORDER BY created_at DESC`,
+        [cid]
       );
   const lines = await loadLines(rows.map((r) => r.id));
   return rows.map((r) => mapOrder(r, lines.get(r.id) ?? []));
@@ -218,11 +232,14 @@ function normalizeLines(
 export async function createPedido(input: {
   clientId: string;
   lines: OrderLine[];
+  comercioId?: string;
 }): Promise<Order> {
   if (!input.clientId) throw new HttpError(400, "Elegí un cliente.");
+  const { getDefaultComercioId } = await import("./comercios.js");
+  const comercioId = input.comercioId || (await getDefaultComercioId());
   const client = await getClient(input.clientId);
   if (!client) throw new HttpError(404, "Cliente no encontrado.");
-  const listId = await resolveClientPriceListId(client.id);
+  const listId = await resolveClientPriceListId(client.id, comercioId);
 
   const products = await Promise.all(
     input.lines.map((l) => getProduct(l.productId))
@@ -243,6 +260,7 @@ export async function createPedido(input: {
     const folio = await nextFolio(conn, "pedido");
     const draft: Order = {
       id,
+      comercioId,
       folio,
       clientId: client.id,
       clienteNombre: client.nombre,
@@ -266,18 +284,27 @@ export async function createPedido(input: {
 export async function createMayoristaPedido(input: {
   clientId: string;
   lines: OrderLine[];
+  comercioId?: string;
 }): Promise<Order> {
   if (!input.clientId) throw new HttpError(400, "Elegí un cliente.");
+  const { getDefaultComercioId } = await import("./comercios.js");
+  const { listPriceLists } = await import("./price-lists.js");
+  const comercioId = input.comercioId || (await getDefaultComercioId());
   const client = await getClient(input.clientId);
   if (!client) throw new HttpError(404, "Cliente no encontrado.");
-  await ensureActiveList(PRICE_LIST_MAYORISTA);
+  const lists = await listPriceLists(true, comercioId);
+  const mayorista =
+    lists.find((l) => l.codigo === "mayorista") ??
+    lists.find((l) => l.id === PRICE_LIST_MAYORISTA);
+  if (!mayorista) throw new HttpError(400, "No hay lista mayorista en este comercio.");
+  await ensureActiveList(mayorista.id);
 
   const products = await Promise.all(
     input.lines.map((l) => getProduct(l.productId))
   );
   const lines = normalizeLines(input.lines, (l) => {
     const p = products.find((x) => x?.id === l.productId);
-    return p ? productPrice(p, PRICE_LIST_MAYORISTA) : l.precioUnitario;
+    return p ? productPrice(p, mayorista.id) : l.precioUnitario;
   });
   for (let i = 0; i < lines.length; i++) {
     if (!products[i]) {
@@ -287,10 +314,12 @@ export async function createMayoristaPedido(input: {
   }
 
   const id = nextId("o");
+  let pending: PendingDeduction[] = [];
   const order = await withTransaction(async (conn) => {
     const folio = await nextFolio(conn, "mayorista");
     const draft: Order = {
       id,
+      comercioId,
       folio,
       clientId: client.id,
       clienteNombre: client.nombre,
@@ -298,16 +327,17 @@ export async function createMayoristaPedido(input: {
       lines,
       createdAt: new Date().toISOString(),
       canal: "mayorista",
-      priceListId: PRICE_LIST_MAYORISTA,
+      priceListId: mayorista.id,
       conEnvio: false,
       envioCosto: 0,
       direccionEnvio: null,
       telefonoContacto: null,
       metodoPago: null,
     };
-    await insertOrder(conn, draft, true);
+    pending = await insertOrder(conn, draft, true);
     return draft;
   });
+  await applyDeductions(pending);
   return (await getOrder(order.id)) ?? order;
 }
 
@@ -320,6 +350,7 @@ export async function createPosSale(input: {
   direccionEnvio?: string;
   telefonoContacto?: string;
   metodoPago?: PaymentMethod | null;
+  comercioId?: string;
 }): Promise<Order> {
   if (!input.lines.length) {
     throw new HttpError(400, "Agregá al menos un producto.");
@@ -332,16 +363,18 @@ export async function createPosSale(input: {
     );
   }
 
+  const { getDefaultComercioId } = await import("./comercios.js");
+  const comercioId = input.comercioId || (await getDefaultComercioId());
   const clientId = input.clientId ?? null;
   const client = clientId ? await getClient(clientId) : null;
   if (clientId && !client) throw new HttpError(404, "Cliente no encontrado.");
 
   let listId =
     input.priceListId ||
-    (await resolveClientPriceListId(clientId)) ||
-    (await getDefaultPriceListId());
+    (await resolveClientPriceListId(clientId, comercioId)) ||
+    (await getDefaultPriceListId(comercioId));
   const list = await getPriceList(listId);
-  if (!list?.activa) listId = await getDefaultPriceListId();
+  if (!list?.activa) listId = await getDefaultPriceListId(comercioId);
 
   const conEnvio = Boolean(input.conEnvio);
   const envioCosto = conEnvio
@@ -387,10 +420,12 @@ export async function createPosSale(input: {
   }
 
   const id = nextId("o");
+  let pending: PendingDeduction[] = [];
   const order = await withTransaction(async (conn) => {
     const folio = await nextFolio(conn, "pos");
     const draft: Order = {
       id,
+      comercioId,
       folio,
       clientId: client?.id ?? null,
       clienteNombre: client?.nombre ?? "Mostrador",
@@ -405,40 +440,51 @@ export async function createPosSale(input: {
       telefonoContacto,
       metodoPago,
     };
-    await insertOrder(conn, draft, true);
+    pending = await insertOrder(conn, draft, true);
     return draft;
   });
+  await applyDeductions(pending);
   return (await getOrder(order.id)) ?? order;
 }
 
-export async function dashboardStats(todayIso?: string): Promise<{
+export async function dashboardStats(
+  todayIso?: string,
+  comercioId?: string
+): Promise<{
   productos: number;
   clientes: number;
   pedidosAbiertos: number;
   ventasHoy: number;
   stockBajo: number;
 }> {
+  const { getDefaultComercioId } = await import("./comercios.js");
+  const cid = comercioId || (await getDefaultComercioId());
   const day = todayIso ?? new Date().toISOString().slice(0, 10);
 
   const [prod] = await query<RowDataPacket[]>(
-    `SELECT COUNT(*) AS n FROM products WHERE activo = 1`
+    `SELECT COUNT(*) AS n FROM products WHERE activo = 1 AND comercio_id = ?`,
+    [cid]
   );
   const [cli] = await query<RowDataPacket[]>(
-    `SELECT COUNT(*) AS n FROM clients`
+    `SELECT COUNT(*) AS n FROM clients WHERE comercio_id = ?`,
+    [cid]
   );
   const [abiertos] = await query<RowDataPacket[]>(
     `SELECT COUNT(*) AS n FROM orders
-     WHERE status IN ('confirmado','preparando')`
+     WHERE comercio_id = ? AND status IN ('confirmado','preparando')`,
+    [cid]
   );
   const [stock] = await query<RowDataPacket[]>(
-    `SELECT COUNT(*) AS n FROM products WHERE activo = 1 AND stock <= 20`
+    `SELECT COUNT(*) AS n FROM products WHERE activo = 1 AND comercio_id = ? AND stock <= 20`,
+    [cid]
   );
 
   const ordersHoy = await query<OrderRow[]>(
     `SELECT * FROM orders
-     WHERE DATE(created_at) = ?
+     WHERE comercio_id = ?
+       AND DATE(created_at) = ?
        AND status NOT IN ('cancelado','borrador')`,
-    [day]
+    [cid, day]
   );
   const linesMap = await loadLines(ordersHoy.map((o) => o.id));
   let ventasHoy = 0;
