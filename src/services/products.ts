@@ -3,6 +3,8 @@ import { query, withTransaction } from "../db/pool.js";
 import { HttpError } from "../lib/http.js";
 import { nextId } from "../lib/ids.js";
 import type { Product, ProductCategory } from "../types.js";
+import { getProductStockByBranch, setProductBranchStock } from "./branches.js";
+import { enrichProductsWithLinks } from "./channels.js";
 import { getDefaultPriceListId } from "./price-lists.js";
 
 type ProdRow = RowDataPacket & {
@@ -69,7 +71,14 @@ export async function listProducts(): Promise<Product[]> {
     `SELECT * FROM products ORDER BY nombre ASC`
   );
   const precios = await loadPrecios(rows.map((r) => r.id));
-  return rows.map((r) => mapProduct(r, precios.get(r.id) ?? {}));
+  const base = rows.map((r) => mapProduct(r, precios.get(r.id) ?? {}));
+  const withStock = await Promise.all(
+    base.map(async (p) => ({
+      ...p,
+      stockByBranch: await getProductStockByBranch(p.id),
+    }))
+  );
+  return enrichProductsWithLinks(withStock);
 }
 
 export async function getProduct(id: string): Promise<Product | null> {
@@ -79,7 +88,12 @@ export async function getProduct(id: string): Promise<Product | null> {
   );
   if (!rows[0]) return null;
   const precios = await loadPrecios([id]);
-  return mapProduct(rows[0], precios.get(id) ?? {});
+  const product = {
+    ...mapProduct(rows[0], precios.get(id) ?? {}),
+    stockByBranch: await getProductStockByBranch(id),
+  };
+  const [enriched] = await enrichProductsWithLinks([product]);
+  return enriched ?? product;
 }
 
 export async function upsertProduct(input: {
@@ -89,6 +103,7 @@ export async function upsertProduct(input: {
   categoria: ProductCategory;
   costo: number;
   stock: number;
+  stockByBranch?: Record<string, number>;
   activo?: boolean;
   descripcion?: string;
   precios: Record<string, number>;
@@ -159,6 +174,14 @@ export async function upsertProduct(input: {
       );
     }
   });
+
+  if (input.stockByBranch && Object.keys(input.stockByBranch).length > 0) {
+    await setProductBranchStock(id, input.stockByBranch);
+  } else {
+    const { getDefaultBranchId } = await import("./branches.js");
+    const defaultBranch = await getDefaultBranchId();
+    await setProductBranchStock(id, { [defaultBranch]: input.stock });
+  }
 
   const product = await getProduct(id);
   if (!product) throw new HttpError(500, "No se pudo guardar el producto.");

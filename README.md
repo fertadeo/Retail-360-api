@@ -1,8 +1,8 @@
-# template-retail-api
+# Retail 360 API
 
-Gold **Aurix Retail** (API Express + MySQL). Single-tenant: cada instancia de cliente recibe su propia DB y deploy PM2.
+API Express + MySQL (single-tenant) para **Retail 360**: misma línea que el gold Aurix Retail, con **sucursales** y sync de productos hacia **WooCommerce** y **Mercado Libre**.
 
-Contrato alineado al store del front `template-retail`.
+Base: `fertadeo/template-retail-api`. Destino de provision: este repo.
 
 ## Requisitos
 
@@ -20,27 +20,25 @@ npm run dev
 
 API en `http://127.0.0.1:3852` · prefijo `/api`.
 
-## Endpoints
+## Endpoints nuevos (Retail 360)
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/api/health` | Salud + ping DB |
-| GET | `/api/dashboard/stats` | KPIs |
-| GET/POST | `/api/price-lists` | Listas de precios |
-| PATCH | `/api/price-lists/:id` | Actualizar lista |
-| POST | `/api/price-lists/:id/set-default` | Marcar default |
-| GET/POST | `/api/products` | Productos |
-| PATCH | `/api/products/:id` | Actualizar producto |
-| GET/POST | `/api/clients` | Clientes |
-| PATCH | `/api/clients/:id` | Actualizar cliente |
-| GET | `/api/orders` | Pedidos (`?canal=pos\|pedido\|mayorista`) |
-| POST | `/api/orders` | Pedido canal `pedido` |
-| POST | `/api/pos/checkout` | Venta POS (+ envío / pago) |
-| GET/POST | `/api/wholesale/orders` | Pedidos mayorista |
+| GET/POST | `/api/branches` | Sucursales |
+| PATCH | `/api/branches/:id` | Actualizar sucursal |
+| POST | `/api/branches/:id/set-default` | Sucursal default |
+| GET | `/api/channels` | Estado WooCommerce + ML |
+| PUT | `/api/channels/:channel` | Guardar credenciales (`woocommerce` \| `mercadolibre`) |
+| PUT | `/api/products/:id/channels/:channel` | Vincular ID externo |
+| POST | `/api/channels/woocommerce/products/:id/push` | Empujar producto (crea o actualiza) |
+| POST | `/api/channels/woocommerce/link-by-sku` | Vincular por SKU |
+| POST | `/api/channels/woocommerce/push-all` | Sync masivo WC |
+| POST | `/api/channels/mercadolibre/products/:id/push` | Empujar stock/precio a ítem ML |
+| POST | `/api/channels/mercadolibre/push-all` | Sync masivo ML |
+
+Stock de canal: `stock_mode` = `total` \| `default_branch` \| `branch` (+ `stockBranchId`).
 
 ## Deploy (provisioner Fenec)
-
-El alta de instancia clona este template como `aurix-api-{slug}`, crea DB `aurix_{slug}` e inyecta:
 
 ```
 PORT, NODE_ENV=production
@@ -48,11 +46,9 @@ DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
 CORS_ORIGIN=https://{slug}.aurixerp.com
 ```
 
-Scripts usados: `npm run build` · `npm start` (aplica `sql/` al arrancar).
+Scripts: `npm run build` · `npm start` (aplica `sql/` al arrancar).
 
 ## Gold en Fenec Admin
 
-Registrar con:
-
-- `repoTemplate`: `fertadeo/template-retail-api`
-- `repoTemplateFront`: `fertadeo/template-retail`
+- `repoTemplate`: `fertadeo/Retail-360-api`
+- `repoTemplateFront`: `fertadeo/Retail-360-nextjs`

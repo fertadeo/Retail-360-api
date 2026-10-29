@@ -12,6 +12,47 @@ export type PriceList = {
   esDefault: boolean;
 };
 
+export type Channel = "woocommerce" | "mercadolibre";
+
+export type StockMode = "total" | "default_branch" | "branch";
+
+export type Branch = {
+  id: string;
+  codigo: string;
+  nombre: string;
+  direccion: string;
+  activa: boolean;
+  esDefault: boolean;
+};
+
+export type ChannelLink = {
+  productId: string;
+  channel: Channel;
+  externalId: string;
+  externalSku: string;
+  syncEnabled: boolean;
+  lastSyncedAt: string | null;
+  lastError: string | null;
+};
+
+export type ChannelConfigPublic = {
+  channel: Channel;
+  enabled: boolean;
+  storeUrl: string | null;
+  consumerKey: string | null;
+  consumerSecretSet: boolean;
+  consumerSecretMasked: string | null;
+  accessTokenSet: boolean;
+  accessTokenMasked: string | null;
+  sellerId: string | null;
+  siteId: string;
+  priceListId: string | null;
+  stockMode: StockMode;
+  stockBranchId: string | null;
+  lastSyncAt: string | null;
+  configured: boolean;
+};
+
 export type Product = {
   id: string;
   sku: string;
@@ -21,8 +62,11 @@ export type Product = {
   precios: Record<string, number>;
   costo: number;
   stock: number;
+  /** Stock por sucursal (branchId → qty). */
+  stockByBranch?: Record<string, number>;
   activo: boolean;
   descripcion: string;
+  channelLinks?: ChannelLink[];
 };
 
 export type PaymentMethod = "efectivo" | "transferencia";

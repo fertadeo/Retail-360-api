@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
 import { sendError } from "../lib/http.js";
+import * as branchesSvc from "../services/branches.js";
+import * as channelsSvc from "../services/channels.js";
 import * as clientsSvc from "../services/clients.js";
 import * as ordersSvc from "../services/orders.js";
 import * as priceListsSvc from "../services/price-lists.js";
@@ -13,7 +15,7 @@ apiRouter.get("/health", async (_req, res) => {
   const db = await testConnection();
   res.json({
     ok: true,
-    service: "template-retail-api",
+    service: "retail-360-api",
     db,
   });
 });
@@ -107,6 +109,7 @@ const productBody = z.object({
   categoria: z.enum(["bebidas", "alimentos", "limpieza", "otros"]),
   costo: z.number(),
   stock: z.number(),
+  stockByBranch: z.record(z.string(), z.number()).optional(),
   activo: z.boolean().optional(),
   descripcion: z.string().optional(),
   precios: z.record(z.string(), z.number()),
@@ -267,6 +270,202 @@ apiRouter.post("/wholesale/orders", async (req, res) => {
 apiRouter.get("/wholesale/orders", async (_req, res) => {
   try {
     res.json(await ordersSvc.listOrders("mayorista"));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+/* —— Branches (sucursales) —— */
+apiRouter.get("/branches", async (req, res) => {
+  try {
+    const onlyActive = req.query.active === "1" || req.query.active === "true";
+    res.json(await branchesSvc.listBranches(onlyActive));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/branches", async (req, res) => {
+  try {
+    const body = z
+      .object({
+        codigo: z.string(),
+        nombre: z.string(),
+        direccion: z.string().optional(),
+        activa: z.boolean().optional(),
+        esDefault: z.boolean().optional(),
+      })
+      .parse(req.body);
+    res.status(201).json(await branchesSvc.upsertBranch(body));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.patch("/branches/:id", async (req, res) => {
+  try {
+    const body = z
+      .object({
+        codigo: z.string(),
+        nombre: z.string(),
+        direccion: z.string().optional(),
+        activa: z.boolean().optional(),
+        esDefault: z.boolean().optional(),
+      })
+      .parse(req.body);
+    res.json(
+      await branchesSvc.upsertBranch({ ...body, id: req.params.id })
+    );
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/branches/:id/set-default", async (req, res) => {
+  try {
+    res.json(await branchesSvc.setDefaultBranch(req.params.id));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+/* —— Channels (WooCommerce / Mercado Libre) —— */
+apiRouter.get("/channels", async (_req, res) => {
+  try {
+    res.json(await channelsSvc.listChannelConfigs());
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.get("/channels/:channel", async (req, res) => {
+  try {
+    const channel = z.enum(["woocommerce", "mercadolibre"]).parse(req.params.channel);
+    res.json(await channelsSvc.getChannelConfig(channel));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.put("/channels/:channel", async (req, res) => {
+  try {
+    const channel = z.enum(["woocommerce", "mercadolibre"]).parse(req.params.channel);
+    const body = z
+      .object({
+        enabled: z.boolean().optional(),
+        storeUrl: z.string().nullable().optional(),
+        consumerKey: z.string().nullable().optional(),
+        consumerSecret: z.string().nullable().optional(),
+        accessToken: z.string().nullable().optional(),
+        refreshToken: z.string().nullable().optional(),
+        sellerId: z.string().nullable().optional(),
+        siteId: z.string().nullable().optional(),
+        priceListId: z.string().nullable().optional(),
+        stockMode: z.enum(["total", "default_branch", "branch"]).optional(),
+        stockBranchId: z.string().nullable().optional(),
+      })
+      .parse(req.body);
+    res.json(await channelsSvc.saveChannelConfig(channel, body));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.get("/products/:id/channels", async (req, res) => {
+  try {
+    res.json(await channelsSvc.listProductLinks(req.params.id));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.put("/products/:id/channels/:channel", async (req, res) => {
+  try {
+    const channel = z.enum(["woocommerce", "mercadolibre"]).parse(req.params.channel);
+    const body = z
+      .object({
+        externalId: z.string(),
+        externalSku: z.string().optional(),
+        syncEnabled: z.boolean().optional(),
+      })
+      .parse(req.body);
+    res.json(
+      await channelsSvc.upsertProductLink({
+        productId: req.params.id,
+        channel,
+        ...body,
+      })
+    );
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.delete("/products/:id/channels/:channel", async (req, res) => {
+  try {
+    const channel = z.enum(["woocommerce", "mercadolibre"]).parse(req.params.channel);
+    await channelsSvc.deleteProductLink(req.params.id, channel);
+    res.status(204).end();
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/channels/woocommerce/products/:id/push", async (req, res) => {
+  try {
+    const mode = z
+      .enum(["stock", "price", "both", "full"])
+      .optional()
+      .default("both")
+      .parse(req.body?.mode ?? req.query.mode);
+    res.json(await channelsSvc.pushProductToWooCommerce(req.params.id, mode));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/channels/woocommerce/push-all", async (req, res) => {
+  try {
+    const mode = z
+      .enum(["stock", "price", "both", "full"])
+      .optional()
+      .default("both")
+      .parse(req.body?.mode ?? "both");
+    res.json({ results: await channelsSvc.pushAllWooCommerce(mode) });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/channels/woocommerce/link-by-sku", async (_req, res) => {
+  try {
+    res.json(await channelsSvc.linkWooCommerceBySku());
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/channels/mercadolibre/products/:id/push", async (req, res) => {
+  try {
+    const mode = z
+      .enum(["stock", "price", "both"])
+      .optional()
+      .default("both")
+      .parse(req.body?.mode ?? req.query.mode);
+    res.json(await channelsSvc.pushProductToMercadoLibre(req.params.id, mode));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/channels/mercadolibre/push-all", async (req, res) => {
+  try {
+    const mode = z
+      .enum(["stock", "price", "both"])
+      .optional()
+      .default("both")
+      .parse(req.body?.mode ?? "both");
+    res.json({ results: await channelsSvc.pushAllMercadoLibre(mode) });
   } catch (err) {
     sendError(res, err);
   }

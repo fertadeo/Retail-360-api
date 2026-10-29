@@ -45,7 +45,7 @@ export async function testConnection(): Promise<boolean> {
     connection.release();
     return true;
   } catch (err) {
-    console.error("[template-retail-api] DB connection failed:", err);
+    console.error("[retail-360-api] DB connection failed:", err);
     return false;
   }
 }
