@@ -7,6 +7,7 @@ import * as channelsSvc from "../services/channels.js";
 import * as clientsSvc from "../services/clients.js";
 import * as comerciosSvc from "../services/comercios.js";
 import * as discountRulesSvc from "../services/discount-rules.js";
+import * as mediaSvc from "../services/media.js";
 import * as ordersSvc from "../services/orders.js";
 import * as priceListsSvc from "../services/price-lists.js";
 import * as productsSvc from "../services/products.js";
@@ -855,6 +856,67 @@ apiRouter.post("/quotes/:id/status", async (req, res) => {
 apiRouter.delete("/quotes/:id", async (req, res) => {
   try {
     await quotesSvc.deleteQuote(req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+/* —— Media library —— */
+apiRouter.get("/media", async (req, res) => {
+  try {
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
+    const kindRaw = String(req.query.kind ?? "all").toLowerCase();
+    const kind =
+      kindRaw === "image" || kindRaw === "images"
+        ? "image"
+        : kindRaw === "attachment" ||
+            kindRaw === "attachments" ||
+            kindRaw === "file" ||
+            kindRaw === "files"
+          ? "attachment"
+          : "all";
+    const q = typeof req.query.q === "string" ? req.query.q : "";
+    res.json(await mediaSvc.listMedia({ comercioId, kind, q }));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+const mediaBody = z.object({
+  productId: z.string().nullable().optional(),
+  kind: z.enum(["image", "attachment"]).optional(),
+  filename: z.string().min(1),
+  mime: z.string().min(1),
+  sizeBytes: z.number().int().nonnegative(),
+  dataUrl: z.string().nullable().optional(),
+  title: z.string().optional(),
+});
+
+apiRouter.post("/media", async (req, res) => {
+  try {
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
+    const body = mediaBody.parse(req.body);
+    res.status(201).json(
+      await mediaSvc.createMedia({
+        comercioId,
+        productId: body.productId ?? null,
+        kind: body.kind,
+        filename: body.filename,
+        mime: body.mime,
+        sizeBytes: body.sizeBytes,
+        dataUrl: body.dataUrl ?? null,
+        title: body.title,
+      })
+    );
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.delete("/media/:id", async (req, res) => {
+  try {
+    await mediaSvc.deleteMedia(req.params.id);
     res.status(204).end();
   } catch (err) {
     sendError(res, err);
