@@ -289,21 +289,58 @@ export async function deleteMedia(id: string): Promise<void> {
   }
 }
 
+export type OptimizeMediaPreview = {
+  id: string;
+  title: string;
+  productId: string | null;
+  sourceLabel: string;
+  before: {
+    filename: string;
+    mime: string;
+    sizeBytes: number;
+    dataUrl: string;
+  };
+  after: {
+    filename: string;
+    mime: string;
+    sizeBytes: number;
+    dataUrl: string;
+  };
+  savedBytes: number;
+};
+
 export type OptimizeMediaResult = {
+  dryRun: boolean;
   converted: number;
   skipped: number;
   errors: number;
   details: Array<{
     id: string;
-    status: "converted" | "skipped" | "error";
+    status: "converted" | "skipped" | "error" | "preview";
     detail?: string;
+    beforeFilename?: string;
+    afterFilename?: string;
+    productId?: string | null;
   }>;
+  previews: OptimizeMediaPreview[];
 };
 
-/** Backfill: raster → WebP en media_assets (límite por request). */
+function nextTitleAfterRename(
+  title: string,
+  oldFilename: string,
+  newFilename: string
+): string {
+  const t = (title || "").trim();
+  if (!t || t === oldFilename) return newFilename;
+  return t;
+}
+
+/** Backfill: preview (dryRun) o aplica raster → WebP; renombra y actualiza el asset (y lo que ve el producto). */
 export async function optimizeExistingMedia(opts?: {
   comercioId?: string;
   limit?: number;
+  dryRun?: boolean;
+  ids?: string[];
 }): Promise<OptimizeMediaResult> {
   if (!fenecwebpConvertConfigured()) {
     throw new HttpError(
@@ -311,6 +348,10 @@ export async function optimizeExistingMedia(opts?: {
       "FenecWebP no está configurado (FENECWEBP_ENABLED + FENECWEBP_API_KEY)."
     );
   }
+  const dryRun = Boolean(opts?.dryRun);
+  const idFilter = new Set(
+    (opts?.ids ?? []).map((id) => String(id).trim()).filter(Boolean)
+  );
   const limit = Math.min(50, Math.max(1, Number(opts?.limit) || 20));
   const comercioId =
     opts?.comercioId || (await getDefaultComercioId());
@@ -324,12 +365,14 @@ export async function optimizeExistingMedia(opts?: {
   );
 
   const details: OptimizeMediaResult["details"] = [];
+  const previews: OptimizeMediaPreview[] = [];
   let converted = 0;
   let skipped = 0;
   let errors = 0;
   let processed = 0;
 
   for (const row of rows) {
+    if (idFilter.size > 0 && !idFilter.has(row.id)) continue;
     if (processed >= limit) break;
     const asset = mapRow(row);
     if (!asset.dataUrl || !isConvertibleImage(asset.mime, asset.filename)) {
@@ -350,9 +393,10 @@ export async function optimizeExistingMedia(opts?: {
       dataUrl: asset.dataUrl,
     });
     if (
-      next.mime === asset.mime &&
-      next.filename === asset.filename &&
-      next.sizeBytes === asset.sizeBytes
+      !next.dataUrl ||
+      (next.mime === asset.mime &&
+        next.filename === asset.filename &&
+        next.sizeBytes === asset.sizeBytes)
     ) {
       errors += 1;
       details.push({
@@ -362,15 +406,73 @@ export async function optimizeExistingMedia(opts?: {
       });
       continue;
     }
+
+    const preview: OptimizeMediaPreview = {
+      id: asset.id,
+      title: asset.title,
+      productId: asset.productId,
+      sourceLabel: asset.sourceLabel,
+      before: {
+        filename: asset.filename,
+        mime: asset.mime,
+        sizeBytes: asset.sizeBytes,
+        dataUrl: asset.dataUrl,
+      },
+      after: {
+        filename: next.filename,
+        mime: next.mime,
+        sizeBytes: next.sizeBytes,
+        dataUrl: next.dataUrl,
+      },
+      savedBytes: Math.max(0, asset.sizeBytes - next.sizeBytes),
+    };
+    previews.push(preview);
+
+    if (dryRun) {
+      details.push({
+        id: asset.id,
+        status: "preview",
+        beforeFilename: asset.filename,
+        afterFilename: next.filename,
+        productId: asset.productId,
+      });
+      continue;
+    }
+
+    const newTitle = nextTitleAfterRename(
+      row.title || asset.title,
+      asset.filename,
+      next.filename
+    );
     await execute(
       `UPDATE media_assets
-       SET filename = ?, mime = ?, size_bytes = ?, data_url = ?
+       SET filename = ?, mime = ?, size_bytes = ?, data_url = ?, title = ?
        WHERE id = ?`,
-      [next.filename, next.mime, next.sizeBytes, next.dataUrl, asset.id]
+      [
+        next.filename,
+        next.mime,
+        next.sizeBytes,
+        next.dataUrl,
+        newTitle,
+        asset.id,
+      ]
     );
     converted += 1;
-    details.push({ id: asset.id, status: "converted" });
+    details.push({
+      id: asset.id,
+      status: "converted",
+      beforeFilename: asset.filename,
+      afterFilename: next.filename,
+      productId: asset.productId,
+    });
   }
 
-  return { converted, skipped, errors, details };
+  return {
+    dryRun,
+    converted: dryRun ? 0 : converted,
+    skipped,
+    errors,
+    details,
+    previews,
+  };
 }

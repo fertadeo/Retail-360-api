@@ -917,11 +917,18 @@ apiRouter.post("/media", async (req, res) => {
 apiRouter.post("/media/optimize", async (req, res) => {
   try {
     const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
-    const limit = Number((req.body as { limit?: number })?.limit);
+    const body = (req.body ?? {}) as {
+      limit?: number;
+      dryRun?: boolean;
+      ids?: string[];
+    };
+    const limit = Number(body.limit);
     res.json(
       await mediaSvc.optimizeExistingMedia({
         comercioId,
         limit: Number.isFinite(limit) ? limit : 20,
+        dryRun: Boolean(body.dryRun),
+        ids: Array.isArray(body.ids) ? body.ids.map(String) : undefined,
       })
     );
   } catch (err) {
