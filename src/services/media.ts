@@ -111,6 +111,9 @@ export type MediaLibraryCounts = {
   images: number;
   attachments: number;
   total: number;
+  totalBytes: number;
+  imagesBytes: number;
+  attachmentsBytes: number;
 };
 
 type MediaRow = RowDataPacket & {
@@ -198,10 +201,27 @@ export async function listMedia(opts?: {
   );
 
   let items = rows.map(mapRow);
+  let imagesBytes = 0;
+  let attachmentsBytes = 0;
+  let images = 0;
+  let attachments = 0;
+  for (const item of items) {
+    const bytes = Math.max(0, Number(item.sizeBytes) || 0);
+    if (item.kind === "image") {
+      images += 1;
+      imagesBytes += bytes;
+    } else {
+      attachments += 1;
+      attachmentsBytes += bytes;
+    }
+  }
   const counts: MediaLibraryCounts = {
-    images: items.filter((i) => i.kind === "image").length,
-    attachments: items.filter((i) => i.kind === "attachment").length,
+    images,
+    attachments,
     total: items.length,
+    totalBytes: imagesBytes + attachmentsBytes,
+    imagesBytes,
+    attachmentsBytes,
   };
 
   const kind = opts?.kind ?? "all";
