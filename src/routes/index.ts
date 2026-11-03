@@ -914,6 +914,21 @@ apiRouter.post("/media", async (req, res) => {
   }
 });
 
+apiRouter.post("/media/optimize", async (req, res) => {
+  try {
+    const comercioId = await comerciosSvc.resolveComercioId(readComercioId(req));
+    const limit = Number((req.body as { limit?: number })?.limit);
+    res.json(
+      await mediaSvc.optimizeExistingMedia({
+        comercioId,
+        limit: Number.isFinite(limit) ? limit : 20,
+      })
+    );
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 apiRouter.delete("/media/:id", async (req, res) => {
   try {
     await mediaSvc.deleteMedia(req.params.id);

@@ -1,5 +1,11 @@
 import "dotenv/config";
 
+function bool(v: string | undefined): boolean {
+  if (!v) return false;
+  const t = v.trim().toLowerCase();
+  return t === "1" || t === "true" || t === "yes" || t === "on";
+}
+
 export const env = {
   port: Number(process.env.PORT ?? 3852),
   nodeEnv: process.env.NODE_ENV ?? "development",
@@ -13,4 +19,10 @@ export const env = {
   get dbEnabled(): boolean {
     return Boolean(this.dbHost && this.dbUser && this.dbName);
   },
+  /** FenecWebP — conversión remota de imágenes (inyectado por Fenec Admin). */
+  fenecwebpEnabled: bool(process.env.FENECWEBP_ENABLED),
+  fenecwebpBaseUrl:
+    process.env.FENECWEBP_BASE_URL?.trim().replace(/\/$/, "") ||
+    "https://webp.fenecstudio.com",
+  fenecwebpApiKey: process.env.FENECWEBP_API_KEY?.trim() || "",
 };
