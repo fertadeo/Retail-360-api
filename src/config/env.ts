@@ -25,4 +25,11 @@ export const env = {
     process.env.FENECWEBP_BASE_URL?.trim().replace(/\/$/, "") ||
     "https://webp.fenecstudio.com",
   fenecwebpApiKey: process.env.FENECWEBP_API_KEY?.trim() || "",
+
+  /** Presencia → Fenec Admin (inyectado al provisionar). */
+  fenecPresenceEnabled: bool(process.env.FENEC_PRESENCE_ENABLED),
+  fenecPresenceIngestUrl:
+    process.env.FENEC_PRESENCE_INGEST_URL?.trim() || "",
+  fenecPresenceSecret: process.env.FENEC_PRESENCE_SECRET?.trim() || "",
+  fenecInstanceSlug: process.env.FENEC_INSTANCE_SLUG?.trim() || "",
 };

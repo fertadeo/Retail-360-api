@@ -10,6 +10,10 @@ import * as discountRulesSvc from "../services/discount-rules.js";
 import * as mediaSvc from "../services/media.js";
 import * as ordersSvc from "../services/orders.js";
 import * as priceListsSvc from "../services/price-lists.js";
+import {
+  pingPresenceToAdmin,
+  presenceConfigured,
+} from "../services/presence.client.js";
 import * as productsSvc from "../services/products.js";
 import * as quotesSvc from "../services/quotes.js";
 import { testConnection } from "../db/pool.js";
@@ -940,6 +944,29 @@ apiRouter.delete("/media/:id", async (req, res) => {
   try {
     await mediaSvc.deleteMedia(req.params.id);
     res.status(204).end();
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+const presencePingBody = z.object({
+  actorKey: z.string().min(1).max(120),
+  displayName: z.string().min(1).max(190),
+  role: z.string().max(120).nullable().optional(),
+  path: z.string().max(255).nullable().optional(),
+  email: z.string().max(190).nullable().optional(),
+});
+
+/** POST /api/presence/ping — front → API → Fenec Admin ingest */
+apiRouter.post("/presence/ping", async (req, res) => {
+  try {
+    const body = presencePingBody.parse(req.body ?? {});
+    if (!presenceConfigured()) {
+      res.json({ ok: false, skipped: true, detail: "Presencia no configurada." });
+      return;
+    }
+    const result = await pingPresenceToAdmin(body);
+    res.json(result);
   } catch (err) {
     sendError(res, err);
   }
