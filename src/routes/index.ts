@@ -13,6 +13,7 @@ import * as priceListsSvc from "../services/price-lists.js";
 import {
   pingPresenceToAdmin,
   presenceConfigured,
+  readClientIp,
 } from "../services/presence.client.js";
 import * as productsSvc from "../services/products.js";
 import * as quotesSvc from "../services/quotes.js";
@@ -965,7 +966,10 @@ apiRouter.post("/presence/ping", async (req, res) => {
       res.json({ ok: false, skipped: true, detail: "Presencia no configurada." });
       return;
     }
-    const result = await pingPresenceToAdmin(body);
+    const result = await pingPresenceToAdmin({
+      ...body,
+      clientIp: readClientIp(req),
+    });
     res.json(result);
   } catch (err) {
     sendError(res, err);
