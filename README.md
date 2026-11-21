@@ -51,3 +51,16 @@ Scripts: `npm run build` · `npm start` (aplica `sql/` al arrancar).
 
 - `repoTemplate`: `fertadeo/Retail-360-api`
 - `repoTemplateFront`: `fertadeo/Retail-360-nextjs`
+
+
+## Publicación de tienda y colecciones
+
+La API ofrece catálogo público paginado, búsqueda y filtros, fotos públicas solo de productos visibles, detalle/galería, revisión de carrito y checkout idempotente por clave. Cada pedido conserva precios y datos del comprador y aparece en la administración con los seis estados de preparación/entrega.
+
+Las colecciones tienen borrador y versión publicada independientes, portada procesada con Sharp, selección paginada de productos, orden, activación y pausa. Solo administradores y superadministradores pueden diseñar/publicar; el modo “Ver como” es de solo lectura.
+
+Aplicar las migraciones SQL antes de servir el frontend. `020_store_collections.sql` agrega colecciones sin publicar automáticamente ninguna. Se validaron compilación y pruebas aisladas de colecciones/autenticación; no se ejecutó MySQL ni se desplegó el servicio.
+
+Retail 360 incorpora las migraciones 008, 011–013 y 016–021 necesarias para usuarios, medios, categorías, checkout y colecciones. No se incluye la migración de purga de datos de demostración. Se conservan sucursales, WooCommerce, Mercado Libre y presencia. Las rutas privadas ahora requieren sesión; las rutas `/api/catalog/public/*` siguen accesibles sin cuenta. Las sesiones usan cookie `retail360_session` y la primera contraseña debe cambiarse.
+
+En una instalación de producción sin usuarios, configurar `SEED_ADMIN_PASSWORD` y opcionalmente `SEED_ADMIN_EMAIL` antes del primer arranque para crear la cuenta inicial; no se instala una contraseña compartida de desarrollo en producción. Desplegar esta API antes de activar la tienda y los accesos del nuevo frontend.

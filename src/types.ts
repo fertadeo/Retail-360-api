@@ -1,8 +1,5 @@
-export type ProductCategory =
-  | "bebidas"
-  | "alimentos"
-  | "limpieza"
-  | "otros";
+/** Código de categoría del comercio (`categories.codigo`). */
+export type ProductCategory = string;
 
 export type PriceList = {
   id: string;
@@ -42,9 +39,31 @@ export type Branch = {
   codigo: string;
   nombre: string;
   direccion: string;
+  /** Rubro del local (p. ej. Tecnología, Bijouterie). */
+  rubro?: string;
   activa: boolean;
   esDefault: boolean;
   comercioId?: string | null;
+};
+
+export type UserRole =
+  | "superadmin"
+  | "administrador"
+  | "vendedor"
+  | "visitante";
+
+export type User = {
+  id: string;
+  email: string;
+  nombre: string;
+  role: UserRole;
+  activa: boolean;
+  /** Sucursales asignadas (solo aplica a vendedor). */
+  branchIds: string[];
+  /** Funciones/módulos habilitados (solo aplica a vendedor). */
+  functions: string[];
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type ChannelLink = {
@@ -75,11 +94,31 @@ export type ChannelConfigPublic = {
   configured: boolean;
 };
 
+export type ProductImage = {
+  id: string;
+  /**
+   * URL lista para <img src>: data URL local o URL remota (WC).
+   * Preferir este campo en UI.
+   */
+  url: string | null;
+  /** Base64 data URL si se subió al servidor. */
+  dataUrl: string | null;
+  /** URL remota (WooCommerce / CDN). */
+  sourceUrl: string | null;
+  title: string;
+  filename: string;
+  mime: string;
+  isPrimary: boolean;
+  sortOrder: number;
+};
+
 export type Product = {
   id: string;
   sku: string;
   nombre: string;
   categoria: ProductCategory;
+  /** Nombre visible. Null si el código ya no existe. */
+  categoriaNombre?: string | null;
   precio: number;
   precios: Record<string, number>;
   costo: number;
@@ -91,6 +130,13 @@ export type Product = {
   comercioId?: string | null;
   stockShared?: boolean;
   channelLinks?: ChannelLink[];
+  /** Imagen principal del producto (si hay). */
+  imagenPrincipal?: ProductImage | null;
+  /** Galería secundaria (sin la principal). */
+  imagenesSecundarias?: ProductImage[];
+  createdAt?: string;
+  /** Unidades vendidas (líneas de pedido no canceladas). */
+  unitsSold?: number;
 };
 
 export type PaymentMethod = "efectivo" | "transferencia";
@@ -139,6 +185,21 @@ export type Order = {
   telefonoContacto: string | null;
   metodoPago: PaymentMethod | null;
   comercioId?: string | null;
+  /** Sucursal donde se realizó la venta/pedido. */
+  branchId?: string | null;
+  /** Usuario vendedor (o admin operando caja). */
+  vendedorId?: string | null;
+  vendedorNombre?: string | null;
+  branchNombre?: string | null;
+};
+
+export type VendorSalesRow = {
+  vendedorId: string | null;
+  vendedorNombre: string;
+  branchId: string | null;
+  branchNombre: string | null;
+  tickets: number;
+  total: number;
 };
 
 export type DiscountBasis = "amount" | "qty";

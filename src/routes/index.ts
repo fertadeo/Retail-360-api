@@ -1,3 +1,7 @@
+import { publicCatalogRouter, privateCatalogRouter } from "./catalog.js";
+import { accountRouter } from "./account.js";
+import { login, logout, requireSession, requireAccountManager } from "../lib/auth.js";
+import * as usersSvc from "../services/users.js";
 import { Router } from "express";
 import { z } from "zod";
 import { readComercioId } from "../lib/comercio-req.js";
@@ -20,6 +24,14 @@ import * as quotesSvc from "../services/quotes.js";
 import { testConnection } from "../db/pool.js";
 
 export const apiRouter = Router();
+apiRouter.use("/catalog/public", publicCatalogRouter);
+apiRouter.use(requireSession);
+apiRouter.use("/auth", accountRouter);
+apiRouter.use("/catalog", privateCatalogRouter);
+apiRouter.use("/users", requireAccountManager);
+apiRouter.post("/auth/login", login);
+apiRouter.post("/auth/logout", logout);
+apiRouter.get("/auth/session", (_req, res) => res.json({ user: res.locals.user, actor: res.locals.actor ?? null }));
 
 apiRouter.get("/health", async (_req, res) => {
   const db = await testConnection();
@@ -974,4 +986,94 @@ apiRouter.post("/presence/ping", async (req, res) => {
   } catch (err) {
     sendError(res, err);
   }
+});
+
+const userRoleSchema = z.enum(["superadmin", "administrador", "vendedor", "visitante"]);
+const userBodySchema = z.object({
+  email: z.string(),
+  nombre: z.string(),
+  password: z.string().optional(),
+  role: userRoleSchema,
+  activa: z.boolean().optional(),
+  branchIds: z.array(z.string()).optional(),
+  functions: z.array(z.string()).optional(),
+});
+
+apiRouter.get("/users", async (req, res) => {
+  try {
+    const onlyActive = req.query.active === "1" || req.query.active === "true";
+    res.json(await usersSvc.listUsers(onlyActive));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.get("/users/functions", async (_req, res) => {
+  try {
+    res.json(usersSvc.listAppFunctions());
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.get("/users/:id", async (req, res) => {
+  try {
+    const user = await usersSvc.getUser(req.params.id);
+    if (!user) {
+      res.status(404).json({ error: "Usuario no encontrado." });
+      return;
+    }
+    res.json(user);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/users", async (req, res) => {
+  try {
+    const body = userBodySchema.parse(req.body);
+    res.status(201).json(await usersSvc.upsertUser(body));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.patch("/users/:id", async (req, res) => {
+  try {
+    const body = userBodySchema.parse(req.body);
+    res.json(await usersSvc.upsertUser({ ...body, id: req.params.id }));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.delete("/users/:id", async (req, res) => {
+  try {
+    res.json(await usersSvc.softDeleteUser(req.params.id));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+apiRouter.post("/users/:id/restore", async (req, res) => {
+  try {
+    res.json(await usersSvc.restoreUser(req.params.id));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+
+apiRouter.get("/media/:id/content", async (req, res) => {
+  try {
+    const media = await mediaSvc.getMediaContent(req.params.id, req.query.thumbnail === "1");
+    if ("redirect" in media) { res.redirect(media.redirect); return; }
+    res.setHeader("Content-Type", media.mime);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+    // Private HTTP cache stores each file separately; listing responses remain no-store.
+    res.setHeader("Cache-Control", "private, max-age=300");
+    if (!media.mime.startsWith("image/") && media.mime !== "application/pdf") res.attachment(media.filename);
+    res.send(media.body);
+  } catch (err) { sendError(res, err); }
 });
